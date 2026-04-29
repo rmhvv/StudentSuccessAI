@@ -8,12 +8,7 @@ import plotly.express as px
 
 # Для Railway и локального запуска без Docker
 import os
-API = os.getenv("RAILWAY_PUBLIC_DOMAIN")
-if API:
-    API = f"https://{API}"
-else:
-    API = "http://127.0.0.1:8000"
-st.set_page_config(page_title="EduAI Analytics", layout="wide")
+API = "web-production-047f6.up.railway.app"
 
 if 'auth' not in st.session_state:
     st.session_state.auth = False
