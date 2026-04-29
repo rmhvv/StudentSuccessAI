@@ -3,8 +3,12 @@ import requests
 import pandas as pd
 import plotly.express as px
 
-API = "http://backend:8000"
+# Для локального Docker
+# API = "http://backend:8000"
 
+# Для Railway и локального запуска без Docker
+import os
+API = os.getenv("API_URL", "http://127.0.0.1:8000")
 st.set_page_config(page_title="EduAI Analytics", layout="wide")
 
 if 'auth' not in st.session_state:
@@ -17,7 +21,18 @@ menu = st.sidebar.selectbox("Раздел",
 # ====================== ГЛАВНАЯ ======================
 if menu == "🏠 Главная":
     st.title("🎓 EduAI Analytics")
-    st.markdown("### Система мониторинга и прогнозирования успеваемости студентов")
+    st.markdown("""
+    ### Интеллектуальная система анализа и прогнозирования успеваемости студентов
+
+    **Возможности проекта:**
+    - Прогнозирование риска неуспеваемости с помощью машинного обучения
+    - Удобный поиск студентов по ФИО
+    - Выставление оценок через выбор из списка
+    - **MOLAP-аналитика** на базе DuckDB — многомерный анализ данных
+    - Фильтры по группам, курсам и уровню риска
+    """)
+
+    st.info("Проект запущен в Docker. MOLAP-куб построен на DuckDB.")
 
 # ====================== СТУДЕНТ ======================
 elif menu == "👤 Студент":
@@ -152,64 +167,82 @@ elif menu == "👨‍🏫 Преподаватель":
             except Exception as e:
                 st.error(f"Ошибка: {e}")
 
-# ====================== МОЛАП АНАЛИТИКА ======================
 elif menu == "📊 Аналитика (MOLAP)":
     if not st.session_state.auth:
         st.warning("Войдите как преподаватель для доступа к аналитике")
     else:
-        st.header("📊 MOLAP Аналитика — Многомерный анализ")
+        st.header("📊 MOLAP Аналитика — DuckDB Analytical Cube")
+        st.caption("Многомерное хранилище данных для быстрого анализа успеваемости")
+
+        col_refresh, col_info = st.columns([1, 3])
+        with col_refresh:
+            if st.button("🔄 Обновить MOLAP куб"):
+                try:
+                    response = requests.get(f"{API}/molap/refresh")
+                    if response.status_code == 200:
+                        st.success("MOLAP куб успешно обновлён!")
+                        st.rerun()
+                    else:
+                        st.error("Ошибка обновления куба")
+                except:
+                    st.error("Не удалось обновить куб")
 
         try:
-            response = requests.get(f"{API}/analytics")
+            response = requests.get(f"{API}/molap")
             if response.status_code == 200:
                 df = pd.DataFrame(response.json())
 
                 # Фильтры
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    groups = st.multiselect("Группа", df['group_name'].unique().tolist(), 
-                                          default=df['group_name'].unique().tolist())
-                with col2:
-                    courses = st.multiselect("Курс", sorted(df['year_of_study'].unique().tolist()), 
-                                           default=sorted(df['year_of_study'].unique().tolist()))
-                with col3:
-                    risk_filter = st.radio("Риск неуспеваемости", ["Все", "Высокий риск", "Низкий риск"])
+                st.subheader("Фильтры")
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    selected_groups = st.multiselect("Группа", df['group_name'].unique(), default=df['group_name'].unique())
+                with c2:
+                    selected_years = st.multiselect("Курс", sorted(df['year_of_study'].unique()), default=sorted(df['year_of_study'].unique()))
+                with c3:
+                    risk_filter = st.radio("Риск", ["Все", "Высокий риск", "Низкий риск"])
 
-                filtered_df = df[(df['group_name'].isin(groups)) & (df['year_of_study'].isin(courses))]
+                filtered_df = df[
+                    (df['group_name'].isin(selected_groups)) & 
+                    (df['year_of_study'].isin(selected_years))
+                ]
                 if risk_filter == "Высокий риск":
-                    filtered_df = filtered_df[filtered_df['risk_label'] == 1]
+                    filtered_df = filtered_df[filtered_df['high_risk'] == 1]
                 elif risk_filter == "Низкий риск":
-                    filtered_df = filtered_df[filtered_df['risk_label'] == 0]
+                    filtered_df = filtered_df[filtered_df['high_risk'] == 0]
 
                 # Метрики
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Студентов", len(filtered_df))
-                c2.metric("Средний балл", round(filtered_df['avg_grade'].mean(), 2) if len(filtered_df)>0 else 0)
-                c3.metric("Средняя посещаемость", f"{round(filtered_df['avg_attendance'].mean(), 1)}%" if len(filtered_df)>0 else "0%")
-                high_risk = len(filtered_df[filtered_df['risk_label'] == 1])
-                c4.metric("Высокий риск", f"{high_risk} ({round(high_risk/len(filtered_df)*100) if len(filtered_df)>0 else 0}%)")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Всего студентов", len(filtered_df))
+                m2.metric("Средний балл", round(filtered_df['avg_grade'].mean(), 2))
+                m3.metric("Средняя посещаемость", f"{round(filtered_df['avg_attendance'].mean(), 1)}%")
+                high = len(filtered_df[filtered_df['high_risk'] == 1])
+                m4.metric("Высокий риск", f"{high} ({round(high / len(filtered_df) * 100 if len(filtered_df) > 0 else 0)}%)")
 
                 # Графики
-                tab_g1, tab_g2, tab_g3 = st.tabs(["По группам", "По курсам", "Риск + Таблица"])
+                tab1, tab2, tab3, tab4 = st.tabs(["По группам", "По курсам", "Риск", "Топ студентов"])
 
-                with tab_g1:
+                with tab1:
                     fig1 = px.bar(filtered_df.groupby('group_name')['avg_grade'].mean().reset_index(),
-                                  x='group_name', y='avg_grade', color='group_name')
+                                  x='group_name', y='avg_grade', color='group_name', title="Средний балл по группам")
                     st.plotly_chart(fig1, use_container_width=True)
 
-                with tab_g2:
-                    fig2 = px.box(filtered_df, x='year_of_study', y='avg_grade', color='group_name')
+                with tab2:
+                    fig2 = px.box(filtered_df, x='year_of_study', y='avg_grade', color='group_name',
+                                  title="Распределение среднего балла по курсам")
                     st.plotly_chart(fig2, use_container_width=True)
 
-                with tab_g3:
-                    fig3 = px.pie(filtered_df, names='risk_label', title="Распределение риска",
-                                  color_discrete_map={0: 'green', 1: 'red'})
+                with tab3:
+                    fig3 = px.pie(filtered_df, names='high_risk', title="Соотношение риска неуспеваемости",
+                                  color_discrete_map={0: '#00cc66', 1: '#ff6666'})
                     st.plotly_chart(fig3, use_container_width=True)
 
-                    st.subheader("Детальная таблица")
-                    st.dataframe(filtered_df.sort_values('avg_grade', ascending=False), use_container_width=True)
+                with tab4:
+                    st.subheader("Топ-10 студентов с высоким риском")
+                    top_risk = filtered_df[filtered_df['high_risk'] == 1].sort_values('avg_grade').head(10)
+                    st.dataframe(top_risk[['name', 'group_name', 'avg_grade', 'avg_attendance']], use_container_width=True)
 
             else:
-                st.error("Не удалось загрузить данные аналитики")
+                st.error("Не удалось загрузить данные из MOLAP куба")
         except Exception as e:
             st.error(f"Ошибка загрузки аналитики: {e}")

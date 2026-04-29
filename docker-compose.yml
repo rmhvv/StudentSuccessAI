@@ -3,7 +3,7 @@ version: '3.8'
 services:
   db:
     image: postgres:16
-    container_name: student_ai_db
+    container_name: student_ai_postgres
     restart: always
     environment:
       POSTGRES_DB: student_ai_db
@@ -14,7 +14,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d student_ai_db"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -36,11 +36,11 @@ services:
       DB_PASSWORD: 12345
     command: >
       sh -c "
-        echo 'Waiting for database...' &&
-        sleep 8 &&
+        echo 'Waiting for PostgreSQL...' &&
+        sleep 10 &&
         python init_db.py &&
         python train_model.py &&
-        echo 'Database and model initialized successfully!' &&
+        echo '=== PostgreSQL + Model initialized ===' &&
         python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
       "
 
